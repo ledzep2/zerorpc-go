@@ -26,9 +26,12 @@ var (
         XSUB   = zmq.XSUB
     )
 
+var GlobalContext *zmq.Context
+
 type Socket interface {
     Connect(endpoint string)
     Invoke(method string, args ...interface{}) interface{}
+    Close()
 }
 
 type zerorpcSocket struct {
@@ -38,8 +41,11 @@ type zerorpcSocket struct {
     Verbose bool
 }
 
-func NewSocket(t zmq.SocketType) Socket {
-    context, _ := zmq.NewContext()
+func NewContext() (*zmq.Context, error) {
+    return zmq.NewContext()
+}
+
+func NewSocket(context *zmq.Context, t zmq.SocketType) Socket {
     socket, _ := context.NewSocket(t)
     return &zerorpcSocket{*context, *socket, log.New(os.Stderr, "zerorpc", log.LstdFlags) , false}
 }
@@ -49,6 +55,11 @@ func (c *zerorpcSocket) Connect(endpoint string) {
         c.logger.Printf("Connecting to \"%v\"\n", endpoint)
     }
     c.socket.Connect(endpoint)
+}
+
+
+func (c *zerorpcSocket) Close() {
+    c.socket.Close()
 }
 
 func buildMessage(method string, args []interface{}) ([]byte, error) {
@@ -93,9 +104,15 @@ func (c *zerorpcSocket) Invoke(method string, args ...interface{}) interface{} {
     return data[2].([]interface{})[0]
 }
 
-
-func NewClient(endpoint string) Socket {
-    socket := NewSocket(REQ)
+func NewClient(endpoint string, context *zmq.Context) Socket {
+    // There should be 1 zmq.Context per application.
+    if context == nil {
+        if GlobalContext == nil {
+            GlobalContext, _ = NewContext()
+        }
+        context = GlobalContext
+    }
+    socket := NewSocket(context, REQ)
     socket.Connect(endpoint)
     return socket
 }
