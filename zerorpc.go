@@ -6,6 +6,7 @@ import (
         "bytes"
         zmq "github.com/alecthomas/gozmq"
         msgpack "github.com/msgpack/msgpack-go"
+        "log"
        )
 
 
@@ -37,11 +38,11 @@ type zerorpcSocket struct {
 func NewSocket(t zmq.SocketType) Socket {
     context, _ := zmq.NewContext()
     socket, _ := context.NewSocket(t)
-    return &zerorpcSocket{context, socket}
+    return &zerorpcSocket{*context, *socket}
 }
 
 func (c *zerorpcSocket) Connect(endpoint string) {
-    fmt.Printf("Connecting to \"%v\"\n", endpoint)
+    log.Printf("Connecting to \"%v\"\n", endpoint)
     c.socket.Connect(endpoint)
 }
 
@@ -60,17 +61,22 @@ func buildMessage(method string, args []interface{}) []byte {
 
 func (c *zerorpcSocket) Invoke(method string, args ...interface{}) interface{} {
     message := buildMessage(method, args)
-    fmt.Println(message)
+    log.Println(message)
     c.socket.Send(message, 0)
     raw, _ := c.socket.Recv(0)
     buf := bytes.NewBuffer(raw)
-    value, _, _ := msgpack.Unpack(buf)
-    data := value.Interface().([]interface{})
-    for k, v := range data[0].(map[interface{}]interface{}) {
-        fmt.Printf("%s = %s\n", k, v)
-    }
-    fmt.Printf("%s\n", data[1])
-    return data[2].([]interface{})[0]
+    if buf != nil {
+        value, _, _ := msgpack.Unpack(buf)
+        data := value.Interface().([]interface{})
+        for k, v := range data[0].(map[interface{}]interface{}) {
+            fmt.Printf("%s = %s\n", k, v)
+        }
+        log.Printf("%s\n", data[1])
+        return data[2].([]interface{})[0]
+    } 
+    
+    log.Println("nil returned")
+    return nil
 }
 
 
