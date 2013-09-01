@@ -5,8 +5,10 @@ import (
         "fmt"
         "bytes"
         zmq "github.com/alecthomas/gozmq"
-        msgpack "github.com/msgpack/msgpack-go"
+        "github.com/ugorji/go/codec"
         "log"
+        "github.com/nu7hatch/gouuid"
+        "os"
        )
 
 
@@ -32,51 +34,63 @@ type Socket interface {
 type zerorpcSocket struct {
     context zmq.Context
     socket zmq.Socket
+    logger *log.Logger 
+    Verbose bool
 }
-
 
 func NewSocket(t zmq.SocketType) Socket {
     context, _ := zmq.NewContext()
     socket, _ := context.NewSocket(t)
-    return &zerorpcSocket{*context, *socket}
+    return &zerorpcSocket{*context, *socket, log.New(os.Stderr, "zerorpc", log.LstdFlags) , false}
 }
 
 func (c *zerorpcSocket) Connect(endpoint string) {
-    log.Printf("Connecting to \"%v\"\n", endpoint)
+    if c.Verbose {
+        c.logger.Printf("Connecting to \"%v\"\n", endpoint)
+    }
     c.socket.Connect(endpoint)
 }
 
-func buildMessage(method string, args []interface{}) []byte {
-    buf := &bytes.Buffer{}
+func buildMessage(method string, args []interface{}) ([]byte, error) {
+    buf := []byte{}
     headers := make(map[string]string)
     //TODO: implement message_id with uuid
-    headers["message_id"] = "deadbeef1234"
+    uuid, _ := uuid.NewV4()
+    headers["message_id"] = uuid.String()
     data := make([]interface{}, 3)
     data[0] = headers
     data[1] = method
     data[2] = args
-    msgpack.Pack(buf, data)
-    return buf.Bytes()
+    enc := codec.NewEncoderBytes(&buf, &codec.MsgpackHandle{})
+    err := enc.Encode(data)
+    return buf, err
 }
 
 func (c *zerorpcSocket) Invoke(method string, args ...interface{}) interface{} {
-    message := buildMessage(method, args)
-    log.Println(message)
+    message, err := buildMessage(method, args)
+    if err != nil {
+        panic("Unable to build message:" + err.Error())
+    }
+    if (c.Verbose) {
+        c.logger.Println("request:", message)
+    }
     c.socket.Send(message, 0)
     raw, _ := c.socket.Recv(0)
     buf := bytes.NewBuffer(raw)
-    if buf != nil {
-        value, _, _ := msgpack.Unpack(buf)
-        data := value.Interface().([]interface{})
+    if (c.Verbose) {
+        c.logger.Print("response:", buf)
+    }
+    dec := codec.NewDecoderBytes(raw, &codec.MsgpackHandle{})
+    var value interface{}
+    dec.Decode(&value)
+    data := value.([]interface{})
+    if (c.Verbose) {
         for k, v := range data[0].(map[interface{}]interface{}) {
             fmt.Printf("%s = %s\n", k, v)
         }
         log.Printf("%s\n", data[1])
-        return data[2].([]interface{})[0]
-    } 
-    
-    log.Println("nil returned")
-    return nil
+    }
+    return data[2].([]interface{})[0]
 }
 
 
